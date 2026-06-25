@@ -1,0 +1,5 @@
+# Your personal settings (created on first run from config.example.json)
+config.json
+
+# Local backup archives, in case anyone keeps them inside the repo
+*.zip

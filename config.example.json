@@ -1,0 +1,22 @@
+{
+  "backupFolder": "%USERPROFILE%\\ZenBackups",
+  "keep": 10,
+  "categories": [
+    "appearance",
+    "shortcuts",
+    "spaces",
+    "preferences",
+    "history",
+    "passwords",
+    "cookies",
+    "sessions",
+    "extensions"
+  ],
+  "schedule": {
+    "frequency": "daily",
+    "time": "13:00",
+    "everyHours": 6,
+    "weekday": "SUN"
+  },
+  "profileOverride": ""
+}
