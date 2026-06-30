@@ -16,11 +16,11 @@ if ($Categories) { $Categories = $Categories -split ',' | ForEach-Object { $_.Tr
 
 # 1. choose the backup
 $backups = @(Get-ChildItem $backupFolder -Filter 'zen_*.zip' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
-if (-not $backups) { Write-Error "No backups found in $backupFolder"; exit 1 }
+if (-not $backups) { Write-Host "No backups found in $backupFolder" -ForegroundColor Red; exit 1 }
 
 if ($Backup) {
     $chosen = $backups | Where-Object { $_.Name -eq $Backup -or $_.FullName -eq $Backup } | Select-Object -First 1
-    if (-not $chosen) { Write-Error "Backup not found: $Backup"; exit 1 }
+    if (-not $chosen) { Write-Host "Backup not found: $Backup" -ForegroundColor Red; exit 1 }
 } else {
     Write-Host "`nAvailable backups:`n" -ForegroundColor Cyan
     for ($i = 0; $i -lt $backups.Count; $i++) {
@@ -28,8 +28,10 @@ if ($Backup) {
         '{0,2}) {1,-22} {2}  {3:N1} MB' -f ($i + 1), $b.Name, $b.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), ($b.Length / 1MB) | Write-Host
     }
     $sel = Read-Host "`nWhich backup do you want to restore? (number)"
-    $idx = [int]$sel - 1
-    if ($idx -lt 0 -or $idx -ge $backups.Count) { Write-Error 'Invalid choice.'; exit 1 }
+    $n = 0
+    if (-not [int]::TryParse($sel.Trim(), [ref]$n)) { Write-Host 'Invalid choice.' -ForegroundColor Red; exit 1 }
+    $idx = $n - 1
+    if ($idx -lt 0 -or $idx -ge $backups.Count) { Write-Host 'Invalid choice.' -ForegroundColor Red; exit 1 }
     $chosen = $backups[$idx]
 }
 Write-Host "Selected: $($chosen.Name)" -ForegroundColor Green
@@ -63,17 +65,23 @@ if (-not $Categories) {
         }
     }
 }
-if (-not $Categories) { Write-Error 'No categories selected.'; Remove-Item $tmp -Recurse -Force; exit 1 }
+if (-not $Categories) { Write-Host 'No categories selected.' -ForegroundColor Red; Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue; exit 1 }
 
 # 4. target profile
 if (-not $ProfilePath) { $ProfilePath = Resolve-ZenProfile $cfg }
+if (-not $ProfilePath) {
+    Write-Host 'No Zen profile found.' -ForegroundColor Red
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
 Write-Host "`nTarget profile: $ProfilePath" -ForegroundColor Cyan
 Write-Host "Restoring: $($Categories -join ', ')" -ForegroundColor Cyan
 
 # 5. Zen must be closed
 if (Test-ZenRunning) {
-    Write-Error 'Zen is running. Close it completely and run the restore again.'
-    Remove-Item $tmp -Recurse -Force; exit 1
+    Write-Host 'Zen is running. Close it completely and run the restore again.' -ForegroundColor Red
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
 }
 $ok = Read-Host "`nProceed? The selected files will be overwritten (y/n)"
 if ($ok.Trim().ToLower() -ne 'y') { Write-Host 'Cancelled.'; Remove-Item $tmp -Recurse -Force; exit 0 }

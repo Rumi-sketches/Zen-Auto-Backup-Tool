@@ -21,7 +21,7 @@ if (-not $Categories) { $Categories = @($cfg.categories) }
 if (-not $Categories) { $Categories = @($ZenCategories.Keys) }
 
 if (-not $ProfilePath) { $ProfilePath = Resolve-ZenProfile $cfg }
-if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) { Write-Error 'No Zen profile found.'; exit 1 }
+if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) { Write-Host 'No Zen profile found.' -ForegroundColor Red; exit 1 }
 
 Say "Profile: $ProfilePath" 'Cyan'
 if (Test-ZenRunning) {
@@ -54,8 +54,11 @@ if (-not (Test-Path $backupFolder)) { New-Item -ItemType Directory -Path $backup
 $zip = Join-Path $backupFolder "zen_$stamp.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+try {
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+} finally {
+    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 $size = '{0:N1} MB' -f ((Get-Item $zip).Length / 1MB)
 Say "Backup created: $zip ($size, $total items)" 'Green'

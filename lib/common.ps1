@@ -143,7 +143,6 @@ function Repair-ZenProfile {
         $content = Get-Content $prefs -Raw
         if ($OldProfilePath -and $OldProfilePath -ne $TargetProfile) {
             $content = $content.Replace(($OldProfilePath -replace '\\', '\\'), ($TargetProfile -replace '\\', '\\'))
-            $content = $content.Replace($OldProfilePath, $TargetProfile)
         }
         if ($content -match 'svg\.context-properties\.content\.enabled') {
             $content = $content -replace 'user_pref\("svg\.context-properties\.content\.enabled",\s*false\);', 'user_pref("svg.context-properties.content.enabled", true);'
@@ -161,23 +160,37 @@ function Repair-ZenProfile {
 }
 
 # Register or remove the Windows scheduled task from the config schedule.
-# Uses schtasks through cmd /c so the quoting around the script path is
-# predictable even when the path contains spaces.
+# Uses the ScheduledTasks PowerShell module so paths with spaces are handled
+# correctly without cmd /c quoting issues.
 function Set-ZenSchedule {
     param($Config)
     $backup = Join-Path $ZenToolRoot 'lib\backup.ps1'
-    $inner  = '-NoProfile -ExecutionPolicy Bypass -File \"' + $backup + '\" -Quiet'
-    $run    = '"powershell.exe ' + $inner + '"'
     $freq   = $Config.schedule.frequency
 
-    cmd /c "schtasks /Delete /TN $TaskName /F 2>nul"
-    switch ($freq) {
-        'disabled' { return 'Automatic backup disabled.' }
-        'daily'    { cmd /c "schtasks /Create /TN $TaskName /TR $run /SC DAILY /ST $($Config.schedule.time) /F"  | Out-Null }
-        'hourly'   { cmd /c "schtasks /Create /TN $TaskName /TR $run /SC HOURLY /MO $($Config.schedule.everyHours) /F" | Out-Null }
-        'weekly'   { cmd /c "schtasks /Create /TN $TaskName /TR $run /SC WEEKLY /D $($Config.schedule.weekday) /ST $($Config.schedule.time) /F" | Out-Null }
-        'onlogon'  { cmd /c "schtasks /Create /TN $TaskName /TR $run /SC ONLOGON /F" | Out-Null }
-        default    { return "Unknown frequency '$freq', task not created." }
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    if ($freq -eq 'disabled') { return 'Automatic backup disabled.' }
+
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+                  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$backup`" -Quiet"
+
+    $dayMap = @{ MON = 'Monday'; TUE = 'Tuesday'; WED = 'Wednesday'; THU = 'Thursday'
+                 FRI = 'Friday'; SAT = 'Saturday'; SUN = 'Sunday' }
+
+    $trigger = switch ($freq) {
+        'daily'   { New-ScheduledTaskTrigger -Daily -At $Config.schedule.time }
+        'hourly'  {
+            $t = New-ScheduledTaskTrigger -Once -At (Get-Date).Date
+            $t.Repetition.Interval = "PT$($Config.schedule.everyHours)H"
+            $t
+        }
+        'weekly'  {
+            $day = $dayMap[$Config.schedule.weekday]
+            New-ScheduledTaskTrigger -Weekly -DaysOfWeek $day -At $Config.schedule.time
+        }
+        'onlogon' { New-ScheduledTaskTrigger -AtLogOn }
+        default   { return "Unknown frequency '$freq', task not created." }
     }
+
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Force | Out-Null
     return "Scheduled task '$TaskName' updated ($freq)."
 }

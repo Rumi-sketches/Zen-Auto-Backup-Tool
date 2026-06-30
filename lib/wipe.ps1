@@ -49,7 +49,7 @@ $proc = Get-Process -Name 'zen' -ErrorAction SilentlyContinue
 if ($proc) {
     Write-Host "Closing Zen..." -ForegroundColor Yellow
     $proc | Stop-Process -Force
-    Start-Sleep 2
+    $proc | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 }
 
 foreach ($t in $targets) {

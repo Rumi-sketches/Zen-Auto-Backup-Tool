@@ -124,7 +124,7 @@ while ($true) {
         '3' { Menu-Settings }
         '4' { & "$PSScriptRoot\lib\wipe.ps1"; Pause-Key }
         '5' { Start-Process explorer.exe (Get-BackupFolder (Get-ZenConfig)) }
-        '0' { break }
+        '0' { return }
         default { }
     }
 }
