@@ -170,7 +170,7 @@ function Set-ZenSchedule {
     $run    = '"powershell.exe ' + $inner + '"'
     $freq   = $Config.schedule.frequency
 
-    cmd /c "schtasks /Delete /TN $TaskName /F" 2>$null | Out-Null
+    cmd /c "schtasks /Delete /TN $TaskName /F 2>nul"
     switch ($freq) {
         'disabled' { return 'Automatic backup disabled.' }
         'daily'    { cmd /c "schtasks /Create /TN $TaskName /TR $run /SC DAILY /ST $($Config.schedule.time) /F"  | Out-Null }
