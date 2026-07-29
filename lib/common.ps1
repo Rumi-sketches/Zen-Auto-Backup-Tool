@@ -33,6 +33,80 @@ $Global:ZenCategories = [ordered]@{
                        items = @('extensions\', 'extensions.json', 'addonStartup.json.lz4') }
 }
 
+# Parse a user selection over a list of options. Tolerant on purpose: the
+# prompts are the only place a typo can kill the script, and $ErrorActionPreference
+# is 'Stop', so nothing here may cast blindly.
+# Accepts: numbers, ranges (2-5), names, 'all'/'*', separated by comma/space/semicolon.
+# Returns @{ Items = @(...); Invalid = @(...) }; Items is empty when nothing matched.
+function Select-ZenItems {
+    param(
+        [string]$Selection,
+        [string[]]$Options
+    )
+    $items = New-Object System.Collections.Generic.List[string]
+    $bad   = New-Object System.Collections.Generic.List[string]
+    $add   = { param($v) if ($v -and -not $items.Contains($v)) { $items.Add($v) } }
+
+    foreach ($tok in ($Selection -split '[,;\s]+')) {
+        $t = $tok.Trim()
+        if (-not $t) { continue }
+        if ($t -eq 'all' -or $t -eq '*') { foreach ($o in $Options) { & $add $o }; continue }
+
+        if ($t -match '^(\d+)\s*-\s*(\d+)$') {
+            $a = [int]$Matches[1]; $b = [int]$Matches[2]
+            if ($a -gt $b) { $c = $a; $a = $b; $b = $c }
+            $any = $false
+            for ($i = $a; $i -le $b; $i++) {
+                if ($i -ge 1 -and $i -le $Options.Count) { & $add $Options[$i - 1]; $any = $true }
+            }
+            if (-not $any) { $bad.Add($t) }
+            continue
+        }
+
+        if ($t -match '^\d+$') {
+            $i = [int]$t
+            if ($i -ge 1 -and $i -le $Options.Count) { & $add $Options[$i - 1] } else { $bad.Add($t) }
+            continue
+        }
+
+        $match = $Options | Where-Object { $_ -eq $t } | Select-Object -First 1
+        if ($match) { & $add $match } else { $bad.Add($t) }
+    }
+    return @{ Items = @($items); Invalid = @($bad) }
+}
+
+# Prompt until the user gives a usable selection (or an empty line, which
+# returns $Default). Never throws on bad input: it explains and asks again.
+function Read-ZenSelection {
+    param(
+        [string]$Prompt,
+        [string[]]$Options,
+        [string[]]$Default = @()
+    )
+    while ($true) {
+        $sel = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($sel)) { return @($Default) }
+        $r = Select-ZenItems -Selection $sel -Options $Options
+        if ($r.Invalid.Count) {
+            Write-Host ("  Not valid: {0}  (use numbers 1-{1}, ranges like 2-4, names, or 'all')" -f ($r.Invalid -join ', '), $Options.Count) -ForegroundColor Yellow
+        }
+        if ($r.Items.Count) { return $r.Items }
+        Write-Host '  Nothing selected, try again.' -ForegroundColor Yellow
+    }
+}
+
+# Read a whole number in a range, re-prompting instead of crashing.
+function Read-ZenInt {
+    param([string]$Prompt, [int]$Min = 1, [int]$Max = [int]::MaxValue, $Default = $null)
+    while ($true) {
+        $v = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($v) -and $null -ne $Default) { return [int]$Default }
+        $n = 0
+        if ([int]::TryParse($v.Trim(), [ref]$n) -and $n -ge $Min -and $n -le $Max) { return $n }
+        Write-Host "  Enter a number between $Min and $Max." -ForegroundColor Yellow
+    }
+}
+
 # Default settings used when config.json is missing or unreadable.
 function New-DefaultConfig {
     [pscustomobject]@{

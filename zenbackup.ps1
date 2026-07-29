@@ -31,16 +31,8 @@ function Pick-Categories {
         $mark = if ($Current -contains $keys[$i]) { '[x]' } else { '[ ]' }
         '{0,2}) {1} {2,-11} {3}' -f ($i + 1), $mark, $keys[$i], $ZenCategories[$keys[$i]].desc | Write-Host
     }
-    Write-Host "`n  Enter = keep current   |   'all' = everything" -ForegroundColor DarkGray
-    $sel = Read-Host 'Type the numbers you want (comma separated)'
-    if ([string]::IsNullOrWhiteSpace($sel)) { return $Current }
-    if ($sel.Trim().ToLower() -eq 'all') { return $keys }
-    $picked = $sel -split ',' | ForEach-Object {
-        $n = [int]($_.Trim()) - 1
-        if ($n -ge 0 -and $n -lt $keys.Count) { $keys[$n] }
-    }
-    if (-not $picked) { return $Current }
-    return @($picked)
+    Write-Host "`n  Numbers (1,3), ranges (1-4) or names   |   Enter = keep current   |   'all' = everything" -ForegroundColor DarkGray
+    return Read-ZenSelection -Prompt 'Type the ones you want' -Options $keys -Default $Current
 }
 
 function Menu-BackupNow {
@@ -80,7 +72,7 @@ function Menu-Settings {
                 Write-Host " e) Disabled (no automatic backup)"
                 switch ((Read-Host 'Choice').Trim().ToLower()) {
                     'a' { $cfg.schedule.frequency = 'daily';   $cfg.schedule.time = (Read-Host 'Time HH:mm (e.g. 13:00)') }
-                    'b' { $cfg.schedule.frequency = 'hourly';  $cfg.schedule.everyHours = [int](Read-Host 'Every how many hours') }
+                    'b' { $cfg.schedule.frequency = 'hourly';  $cfg.schedule.everyHours = Read-ZenInt -Prompt 'Every how many hours' -Min 1 -Max 24 -Default $cfg.schedule.everyHours }
                     'c' { $cfg.schedule.frequency = 'weekly';  $cfg.schedule.weekday = (Read-Host 'Day MON/TUE/WED/THU/FRI/SAT/SUN').ToUpper(); $cfg.schedule.time = (Read-Host 'Time HH:mm') }
                     'd' { $cfg.schedule.frequency = 'onlogon' }
                     'e' { $cfg.schedule.frequency = 'disabled' }
@@ -90,8 +82,8 @@ function Menu-Settings {
                 Pause-Key
             }
             '2' {
-                $n = Read-Host 'Keep how many backups before deleting the oldest'
-                if ($n -match '^\d+$' -and [int]$n -ge 1) { $cfg.keep = [int]$n; Save-ZenConfig $cfg; Write-Host 'Saved.' -ForegroundColor Green }
+                $cfg.keep = Read-ZenInt -Prompt 'Keep how many backups before deleting the oldest' -Min 1 -Max 999 -Default $cfg.keep
+                Save-ZenConfig $cfg; Write-Host 'Saved.' -ForegroundColor Green
                 Pause-Key
             }
             '3' {

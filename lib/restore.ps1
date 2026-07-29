@@ -27,12 +27,9 @@ if ($Backup) {
         $b = $backups[$i]
         '{0,2}) {1,-22} {2}  {3:N1} MB' -f ($i + 1), $b.Name, $b.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), ($b.Length / 1MB) | Write-Host
     }
-    $sel = Read-Host "`nWhich backup do you want to restore? (number)"
-    $n = 0
-    if (-not [int]::TryParse($sel.Trim(), [ref]$n)) { Write-Host 'Invalid choice.' -ForegroundColor Red; exit 1 }
-    $idx = $n - 1
-    if ($idx -lt 0 -or $idx -ge $backups.Count) { Write-Host 'Invalid choice.' -ForegroundColor Red; exit 1 }
-    $chosen = $backups[$idx]
+    Write-Host "`n  Enter = the most recent one" -ForegroundColor DarkGray
+    $n = Read-ZenInt -Prompt 'Which backup do you want to restore? (number)' -Min 1 -Max $backups.Count -Default 1
+    $chosen = $backups[$n - 1]
 }
 Write-Host "Selected: $($chosen.Name)" -ForegroundColor Green
 
@@ -52,18 +49,9 @@ if (-not $Categories) {
         $d = if ($ZenCategories.Contains($c)) { $ZenCategories[$c].desc } else { '' }
         '{0,2}) {1,-11} {2}' -f ($i + 1), $c, $d | Write-Host
     }
-    Write-Host "`n  Enter = appearance + shortcuts + spaces + preferences   |   'all' = everything" -ForegroundColor DarkGray
-    $sel = Read-Host 'Which ones do you want to restore? (numbers separated by commas)'
-    if ([string]::IsNullOrWhiteSpace($sel)) {
-        $Categories = @('appearance', 'shortcuts', 'spaces', 'preferences') | Where-Object { $available -contains $_ }
-    } elseif ($sel.Trim().ToLower() -eq 'all') {
-        $Categories = $available
-    } else {
-        $Categories = $sel -split ',' | ForEach-Object {
-            $n = [int]($_.Trim()) - 1
-            if ($n -ge 0 -and $n -lt $available.Count) { $available[$n] }
-        }
-    }
+    Write-Host "`n  Numbers (1,3), ranges (1-4) or names   |   Enter = appearance + shortcuts + spaces + preferences   |   'all' = everything" -ForegroundColor DarkGray
+    $default = @('appearance', 'shortcuts', 'spaces', 'preferences') | Where-Object { $available -contains $_ }
+    $Categories = Read-ZenSelection -Prompt 'Which ones do you want to restore?' -Options $available -Default $default
 }
 if (-not $Categories) { Write-Host 'No categories selected.' -ForegroundColor Red; Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue; exit 1 }
 
