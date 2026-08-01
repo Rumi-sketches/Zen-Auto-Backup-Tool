@@ -16,11 +16,22 @@ function Show-Header {
     if ($sched -eq 'daily')   { $sched = "daily at $($cfg.schedule.time)" }
     if ($sched -eq 'weekly')  { $sched = "weekly ($($cfg.schedule.weekday)) at $($cfg.schedule.time)" }
     if ($sched -eq 'hourly')  { $sched = "every $($cfg.schedule.everyHours)h" }
-    Write-Host "============ Zen Backup Tool  -  by @Rumi-sketches ============" -ForegroundColor Cyan
+    # Both rules are derived from one width so they always line up.
+    $width = 60
+    $title = "Zen Backup Tool v$ZenToolVersion  -  by @Rumi-sketches"
+    $side  = [math]::Max(0, $width - $title.Length - 2)
+    Write-Host ("{0} {1} {2}" -f ('=' * [math]::Floor($side / 2)), $title, ('=' * [math]::Ceiling($side / 2))) -ForegroundColor Cyan
     Write-Host (" Profile : {0}" -f $(if ($prof) { Split-Path $prof -Leaf } else { 'not found' }))
     Write-Host (" Backups : {0}" -f (Get-BackupFolder $cfg))
-    Write-Host (" Auto    : {0}   keep {1}   [{2}]" -f $sched, $cfg.keep, ($cfg.categories -join ','))
-    Write-Host "========================================================" -ForegroundColor Cyan
+    $auto = " Auto    : {0}   keep {1}   [{2}]" -f $sched, $cfg.keep, ($cfg.categories -join ',')
+    $sens = @(Get-ZenSensitive @($cfg.categories))
+    if ($sens.Count -and $cfg.schedule.frequency -ne 'disabled') {
+        Write-Host $auto -ForegroundColor Yellow
+        Write-Host ("           includes {0}, stored unencrypted" -f ($sens -join ' and ')) -ForegroundColor Yellow
+    } else {
+        Write-Host $auto
+    }
+    Write-Host ('=' * $width) -ForegroundColor Cyan
 }
 
 function Pick-Categories {
@@ -29,9 +40,12 @@ function Pick-Categories {
     Write-Host "`nCategories:`n"
     for ($i = 0; $i -lt $keys.Count; $i++) {
         $mark = if ($Current -contains $keys[$i]) { '[x]' } else { '[ ]' }
-        '{0,2}) {1} {2,-11} {3}' -f ($i + 1), $mark, $keys[$i], $ZenCategories[$keys[$i]].desc | Write-Host
+        $sens = Test-ZenSensitive $keys[$i]
+        $line = '{0,2}) {1} {2} {3,-11} {4}' -f ($i + 1), $mark, $(if ($sens) { '(!)' } else { '   ' }), $keys[$i], $ZenCategories[$keys[$i]].desc
+        if ($sens) { Write-Host $line -ForegroundColor Yellow } else { Write-Host $line }
     }
-    Write-Host "`n  Numbers (1,3), ranges (1-4) or names   |   Enter = keep current   |   'all' = everything" -ForegroundColor DarkGray
+    Write-Host "`n  (!) credentials: stored unencrypted inside the zip, off by default" -ForegroundColor DarkYellow
+    Write-Host "  Numbers (1,3), ranges (1-4) or names   |   Enter = keep current   |   'all' = everything" -ForegroundColor DarkGray
     return Read-ZenSelection -Prompt 'Type the ones you want' -Options $keys -Default $Current
 }
 
@@ -71,9 +85,9 @@ function Menu-Settings {
                 Write-Host " d) At logon"
                 Write-Host " e) Disabled (no automatic backup)"
                 switch ((Read-Host 'Choice').Trim().ToLower()) {
-                    'a' { $cfg.schedule.frequency = 'daily';   $cfg.schedule.time = (Read-Host 'Time HH:mm (e.g. 13:00)') }
+                    'a' { $cfg.schedule.frequency = 'daily';   $cfg.schedule.time = Read-ZenTime -Default $cfg.schedule.time }
                     'b' { $cfg.schedule.frequency = 'hourly';  $cfg.schedule.everyHours = Read-ZenInt -Prompt 'Every how many hours' -Min 1 -Max 24 -Default $cfg.schedule.everyHours }
-                    'c' { $cfg.schedule.frequency = 'weekly';  $cfg.schedule.weekday = (Read-Host 'Day MON/TUE/WED/THU/FRI/SAT/SUN').ToUpper(); $cfg.schedule.time = (Read-Host 'Time HH:mm') }
+                    'c' { $cfg.schedule.frequency = 'weekly';  $cfg.schedule.weekday = Read-ZenWeekday -Default $cfg.schedule.weekday; $cfg.schedule.time = Read-ZenTime -Default $cfg.schedule.time }
                     'd' { $cfg.schedule.frequency = 'onlogon' }
                     'e' { $cfg.schedule.frequency = 'disabled' }
                 }
@@ -87,7 +101,15 @@ function Menu-Settings {
                 Pause-Key
             }
             '3' {
-                $cfg.categories = Pick-Categories @($cfg.categories)
+                $picked = Pick-Categories @($cfg.categories)
+                # These end up in every unattended backup, so ask once here
+                # instead of on each silent run.
+                if (@(Show-ZenSensitiveWarning $picked).Count) {
+                    Write-Host "  Every automatic backup will contain them." -ForegroundColor Yellow
+                    $ok = Read-Host "`nSave anyway? (y/n)"
+                    if ($ok.Trim().ToLower() -ne 'y') { Write-Host 'Not saved.'; Pause-Key; continue }
+                }
+                $cfg.categories = $picked
                 Save-ZenConfig $cfg
                 Write-Host "Saved: $($cfg.categories -join ', ')" -ForegroundColor Green
                 Pause-Key
@@ -107,14 +129,14 @@ while ($true) {
     Write-Host "`n 1) Backup now"
     Write-Host " 2) Restore from a backup"
     Write-Host " 3) Automatic backup settings"
-    Write-Host " 4) Wipe Zen for a fresh install"
+    Write-Host " 4) Reset Zen to factory settings"
     Write-Host " 5) Open backups folder"
     Write-Host " 0) Quit"
     switch (Read-Host "`nChoice") {
         '1' { Menu-BackupNow }
         '2' { & "$PSScriptRoot\lib\restore.ps1"; Pause-Key }
         '3' { Menu-Settings }
-        '4' { & "$PSScriptRoot\lib\wipe.ps1"; Pause-Key }
+        '4' { & "$PSScriptRoot\lib\reset.ps1"; Pause-Key }
         '5' { Start-Process explorer.exe (Get-BackupFolder (Get-ZenConfig)) }
         '0' { return }
         default { }

@@ -1,0 +1,13 @@
+# Normalize line endings so the scripts work no matter how the repo is cloned.
+* text=auto
+
+# Windows shells need CRLF: a .bat with LF endings can break mid-command.
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+*.md   text eol=lf
+*.json text eol=lf
+
+*.png binary
+*.zip binary

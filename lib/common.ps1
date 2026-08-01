@@ -5,13 +5,16 @@
 $ErrorActionPreference = 'Stop'
 
 # Repository root (this file lives in lib\)
-$Global:ZenToolRoot = Split-Path $PSScriptRoot -Parent
-$Global:ConfigPath  = Join-Path $ZenToolRoot 'config.json'
-$Global:ZenRoot     = Join-Path $env:APPDATA 'zen'
-$Global:TaskName    = 'ZenBackup'
+$Global:ZenToolRoot    = Split-Path $PSScriptRoot -Parent
+$Global:ConfigPath     = Join-Path $ZenToolRoot 'config.json'
+$Global:ZenRoot        = Join-Path $env:APPDATA 'zen'
+$Global:TaskName       = 'ZenBackup'
+$Global:ZenToolVersion = '1.0.0'
 
 # Map of categories to the profile files they cover.
 # Entries ending with '\' are folders (copied recursively).
+# 'sensitive' marks credentials that end up readable inside the plain zip:
+# those categories stay out of the defaults and are always warned about.
 $Global:ZenCategories = [ordered]@{
     'appearance'  = @{ desc = 'UI, CSS, mods, themes, toolbar and icon layout'
                        items = @('chrome\', 'zen-themes.json', 'zen-themes\', 'zen-mods\', 'xulstore.json') }
@@ -23,14 +26,73 @@ $Global:ZenCategories = [ordered]@{
                        items = @('prefs.js') }
     'history'     = @{ desc = 'History and bookmarks'
                        items = @('places.sqlite', 'favicons.sqlite') }
-    'passwords'   = @{ desc = 'Saved passwords'
+    'passwords'   = @{ desc = 'Saved passwords'; sensitive = $true
                        items = @('key4.db', 'logins.json', 'logins-backup.json') }
-    'cookies'     = @{ desc = 'Cookies and site permissions'
+    'cookies'     = @{ desc = 'Cookies and site permissions'; sensitive = $true
                        items = @('cookies.sqlite', 'permissions.sqlite') }
     'sessions'    = @{ desc = 'Open tabs and windows'
                        items = @('sessionstore.jsonlz4', 'sessionstore-backups\') }
     'extensions'  = @{ desc = 'Installed extensions'
                        items = @('extensions\', 'extensions.json', 'addonStartup.json.lz4') }
+}
+
+function Test-ZenSensitive {
+    param([string]$Category)
+    return ($ZenCategories.Contains($Category) -and $ZenCategories[$Category].sensitive -eq $true)
+}
+
+# The sensitive categories inside a selection, in category order.
+function Get-ZenSensitive {
+    param([string[]]$Categories)
+    return @($ZenCategories.Keys | Where-Object { $Categories -contains $_ -and (Test-ZenSensitive $_) })
+}
+
+# Spell out what including credentials in a plain zip actually means. Returns
+# the sensitive categories found, so callers can decide whether to confirm.
+function Show-ZenSensitiveWarning {
+    param([string[]]$Categories)
+    $hit = Get-ZenSensitive $Categories
+    if (-not $hit.Count) { return $hit }
+
+    Write-Host "`n  WARNING: this backup includes credentials." -ForegroundColor Yellow
+    foreach ($c in $hit) {
+        "    - {0,-11} {1}" -f $c, ($ZenCategories[$c].items -join ', ') | Write-Host -ForegroundColor Yellow
+    }
+    Write-Host "  The zip is NOT encrypted. Anyone who can read it can extract your saved" -ForegroundColor Yellow
+    Write-Host "  passwords and log in as you on sites you are signed into." -ForegroundColor Yellow
+    if ($Categories -contains 'sessions') {
+        Write-Host "  'sessions' also carries the live logins of your open tabs." -ForegroundColor DarkYellow
+    }
+    Write-Host "  Keep the backups folder off shared drives, cloud sync and USB sticks." -ForegroundColor DarkGray
+    return $hit
+}
+
+# Validated HH:mm, normalized to two digits. Re-prompts instead of letting a
+# typo blow up New-ScheduledTaskTrigger.
+function Read-ZenTime {
+    param([string]$Prompt = 'Time HH:mm (e.g. 13:00)', [string]$Default)
+    while ($true) {
+        $v = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($v) -and $Default) { return $Default }
+        if ($v -match '^\s*([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)\s*$') {
+            return '{0:D2}:{1}' -f [int]$Matches[1], $Matches[2]
+        }
+        Write-Host '  Use a 24h time between 00:00 and 23:59, for example 13:00.' -ForegroundColor Yellow
+    }
+}
+
+function Read-ZenWeekday {
+    param([string]$Prompt = 'Day MON/TUE/WED/THU/FRI/SAT/SUN', [string]$Default)
+    $days = @('MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN')
+    while ($true) {
+        $v = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($v) -and $Default) { return $Default }
+        $u = $v.Trim().ToUpper()
+        if ($days -contains $u) { return $u }
+        $match = $days | Where-Object { $u -like "$_*" } | Select-Object -First 1
+        if ($match) { return $match }
+        Write-Host "  Use one of: $($days -join ', ')." -ForegroundColor Yellow
+    }
 }
 
 # Parse a user selection over a list of options. Tolerant on purpose: the
@@ -108,11 +170,13 @@ function Read-ZenInt {
 }
 
 # Default settings used when config.json is missing or unreadable.
+# Sensitive categories are opt-in: an automatic backup must not start writing
+# credentials to disk unless the user asked for it.
 function New-DefaultConfig {
     [pscustomobject]@{
         backupFolder    = '%USERPROFILE%\ZenBackups'
         keep            = 10
-        categories      = @($ZenCategories.Keys)
+        categories      = @($ZenCategories.Keys | Where-Object { -not (Test-ZenSensitive $_) })
         schedule        = [pscustomobject]@{
             frequency  = 'daily'   # daily | hourly | weekly | onlogon | disabled
             time       = '13:00'
@@ -125,7 +189,16 @@ function New-DefaultConfig {
 
 function Get-ZenConfig {
     if (Test-Path $ConfigPath) {
-        try { return (Get-Content $ConfigPath -Raw | ConvertFrom-Json) } catch { }
+        try {
+            return (Get-Content $ConfigPath -Raw | ConvertFrom-Json)
+        } catch {
+            # Never fail silently here: the user would believe their schedule,
+            # categories and backup folder are in use while they are not.
+            Write-Warning "config.json could not be read: $($_.Exception.Message)"
+            Write-Warning "Falling back to the built-in defaults. YOUR SETTINGS ARE NOT BEING APPLIED."
+            Write-Warning "Fix or delete '$ConfigPath' to get rid of this warning."
+            Write-ZenLog "config.json unreadable ($($_.Exception.Message)), using defaults" 'ERROR'
+        }
     }
     return (New-DefaultConfig)
 }
@@ -137,11 +210,108 @@ function Save-ZenConfig {
 
 function Get-BackupFolder {
     param($Config)
-    [System.Environment]::ExpandEnvironmentVariables($Config.backupFolder)
+    $f = [System.Environment]::ExpandEnvironmentVariables($Config.backupFolder)
+    $Global:ZenLogFolder = $f   # so Write-ZenLog lands next to the backups
+    return $f
+}
+
+# Append one line to zenbackup.log in the backups folder, keeping only the
+# most recent entries. The scheduled task runs with -Quiet and no window, so
+# this file is the only place a failure can show up. Must never throw.
+function Write-ZenLog {
+    param(
+        [string]$Message,
+        [ValidateSet('INFO', 'WARN', 'ERROR')][string]$Level = 'INFO',
+        [string]$Folder,
+        [int]$KeepLines = 200
+    )
+    try {
+        if (-not $Folder) { $Folder = $Global:ZenLogFolder }
+        if (-not $Folder) { $Folder = [System.Environment]::ExpandEnvironmentVariables((New-DefaultConfig).backupFolder) }
+        if (-not (Test-Path $Folder)) { New-Item -ItemType Directory -Path $Folder -Force | Out-Null }
+
+        $log  = Join-Path $Folder 'zenbackup.log'
+        $line = '{0} | {1,-5} | {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
+        Add-Content -Path $log -Value $line -Encoding UTF8
+
+        $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
+        if ($lines.Count -gt $KeepLines) {
+            Set-Content -Path $log -Value ($lines | Select-Object -Last $KeepLines) -Encoding UTF8
+        }
+    } catch { }
+}
+
+# True when Zen itself is running. Matches on the executable path so an
+# unrelated process named 'zen' does not block a backup or a restore. When the
+# path cannot be read (elevated process) or Zen is not found on disk, fall back
+# to the name: a false positive only costs a prompt, a false negative would let
+# us overwrite a profile Zen is still writing to.
+function Get-ZenProcess {
+    $procs = @(Get-Process -Name 'zen' -ErrorAction SilentlyContinue)
+    if (-not $procs.Count) { return @() }
+
+    $exe = Find-ZenExe
+    if (-not $exe) { return $procs }
+
+    $mine = @($procs | Where-Object {
+        $path = $null
+        try { $path = $_.Path } catch { }
+        (-not $path) -or ($path -eq $exe)
+    })
+    return $mine
 }
 
 function Test-ZenRunning {
-    [bool](Get-Process -Name 'zen' -ErrorAction SilentlyContinue)
+    return (@(Get-ZenProcess).Count -gt 0)
+}
+
+# Locate zen.exe. The installer can be per-user or per-machine, so try the
+# usual folders, then the App Paths registry keys, then the Start Menu
+# shortcut. Returns $null when Zen is not installed.
+function Find-ZenExe {
+    $roots = @($env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+    $subs  = @('Programs\Zen Browser\zen.exe', 'Programs\zen\zen.exe', 'Zen Browser\zen.exe', 'zen\zen.exe')
+    foreach ($r in $roots) {
+        foreach ($s in $subs) {
+            $c = Join-Path $r $s
+            if (Test-Path $c) { return $c }
+        }
+    }
+
+    foreach ($hive in 'HKLM:', 'HKCU:') {
+        $key = "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\zen.exe"
+        try {
+            $p = (Get-ItemProperty $key -ErrorAction Stop).'(default)'
+            if ($p -and (Test-Path $p)) { return $p }
+        } catch { }
+    }
+
+    $menus = @(
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),
+        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs')
+    )
+    foreach ($m in $menus) {
+        if (-not (Test-Path $m)) { continue }
+        $lnk = Get-ChildItem $m -Recurse -Filter 'Zen*.lnk' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($lnk) {
+            try {
+                $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk.FullName).TargetPath
+                if ($target -and (Test-Path $target)) { return $target }
+            } catch { }
+        }
+    }
+    return $null
+}
+
+# Countdown on a single line, so a short explanation stays on screen long
+# enough to be read before the script moves on.
+function Wait-ZenCountdown {
+    param([int]$Seconds = 6, [string]$Message = 'Starting in')
+    for ($s = $Seconds; $s -gt 0; $s--) {
+        Write-Host ("`r  {0} {1}s..." -f $Message, $s) -NoNewline -ForegroundColor DarkGray
+        Start-Sleep -Seconds 1
+    }
+    Write-Host ("`r" + (' ' * 40) + "`r") -NoNewline
 }
 
 # All profiles, newest first (by prefs.js write time).

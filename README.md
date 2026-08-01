@@ -6,6 +6,9 @@ A small Windows tool that backs up and restores your [Zen Browser](https://zen-b
 
 It runs from a simple menu. You pick what to back up, how often, and how many copies to keep. Everything is driven by one settings file (`config.json`), so you never have to touch the scripts.
 
+<img src="docs/menu.svg" alt="The Zen Backup Tool main menu in a terminal" width="720">
+
+
 ## Download
 
 **[Download the latest version (zip)](https://github.com/Rumi-sketches/Zen-Auto-Backup-Tool/archive/refs/heads/main.zip)**
@@ -40,7 +43,7 @@ From the menu you can:
 - **Backup now**: full, or only the categories you choose.
 - **Restore from a backup**: pick a backup, then pick which categories to bring back.
 - **Automatic backup settings**: frequency, how many copies to keep, which categories, where to store them.
-- **Wipe Zen for a fresh install**: takes a safety backup, then removes Zen's data folders.
+- **Reset Zen to factory settings**: offers a safety backup, removes Zen's data folders, then lets you reopen Zen as a fresh install or go straight into a restore. Zen itself stays installed.
 
 If you prefer the command line, the same actions live in the `lib` folder:
 
@@ -48,7 +51,7 @@ If you prefer the command line, the same actions live in the `lib` folder:
 powershell -File lib\backup.ps1            # backup using your saved settings
 powershell -File lib\backup.ps1 -Categories appearance,spaces
 powershell -File lib\restore.ps1           # interactive restore
-powershell -File lib\wipe.ps1              # safety backup, then wipe
+powershell -File lib\reset.ps1             # safety backup, then factory reset
 ```
 
 ## Settings
@@ -70,26 +73,53 @@ The automatic backup is a Windows scheduled task named `ZenBackup`. The menu cre
 
 ## Categories
 
-| Category | What it covers |
-|---|---|
-| `appearance` | UI, custom CSS, mods, themes, toolbar and icon layout |
-| `shortcuts` | Keyboard shortcuts |
-| `spaces` | Workspaces: names, themes, tabs, essentials, containers, tab notes |
-| `preferences` | `prefs.js`, with path and SVG icon fixes applied on restore |
-| `history` | History and bookmarks |
-| `passwords` | Saved passwords |
-| `cookies` | Cookies and site permissions |
-| `sessions` | Open tabs and windows |
-| `extensions` | Installed extensions |
+| Category | What it covers | Default |
+|---|---|---|
+| `appearance` | UI, custom CSS, mods, themes, toolbar and icon layout | on |
+| `shortcuts` | Keyboard shortcuts | on |
+| `spaces` | Workspaces: names, themes, tabs, essentials, containers, tab notes | on |
+| `preferences` | `prefs.js`, with path and SVG icon fixes applied on restore | on |
+| `history` | History and bookmarks | on |
+| `sessions` | Open tabs and windows | on |
+| `extensions` | Installed extensions | on |
+| `passwords` **(!)** | Saved passwords | **off** |
+| `cookies` **(!)** | Cookies and site permissions | **off** |
+
+**(!)** marks credentials. See [Security](#security) before turning them on.
 
 ## Restoring onto a fresh install
 
-1. Reinstall Zen, open it once so it creates a profile, then close it completely.
-   - If it detects an old configuration, create a backup first and use option 4, "Wipe Zen for a fresh install".
-2. Run the tool and choose **Restore**.
+1. Open Zen once so it creates a profile, then close it completely.
+   - Coming from an old configuration? Use option 4, "Reset Zen to factory settings", and pick "Open Zen, then restore a backup" at the end: it opens Zen, waits for the new profile, waits for you to close Zen, and starts the restore by itself.
+2. Otherwise run the tool and choose **Restore**.
 3. Pick your backup, then pick the categories you want. For just your look and your Spaces, choose `appearance`, `shortcuts`, `spaces` and `preferences`.
 
 Zen must be closed during a restore. The tool checks this and stops if Zen is still running.
+
+## Security
+
+**Backups are plain, unencrypted zip files.** That is a deliberate trade-off: no password to lose, no proprietary format, and you can always open a backup by hand. It also means the archive is only as safe as the folder it sits in.
+
+Two categories are credentials and are therefore **off by default**:
+
+| Category | Files | What an attacker gets |
+|---|---|---|
+| `passwords` | `key4.db`, `logins.json`, `logins-backup.json` | Every password saved in Zen, decryptable offline unless you use a Primary Password |
+| `cookies` | `cookies.sqlite`, `permissions.sqlite` | Session cookies: your logged-in sessions, reusable without your password |
+
+`sessions` is on by default and is milder, but `sessionstore.jsonlz4` still holds the live state of your open tabs.
+
+If you turn the credential categories on, the tool marks them `(!)`, warns you before every interactive backup, and highlights them in the menu header when they are part of the automatic schedule. On top of that:
+
+- Keep the backups folder on a drive only you can read. Avoid shared folders, USB sticks and cloud sync (OneDrive, Dropbox, Google Drive).
+- Set a **Primary Password** in Zen. Without it, `key4.db` and `logins.json` are enough to recover your passwords on any machine.
+- Deleting a backup zip does not shred it. On an SSD, treat a leaked backup as leaked for good and change the passwords that mattered.
+
+The tool never uploads anything. Everything stays on your machine, and there is no telemetry.
+
+## Logs
+
+Every automatic backup writes a line to `zenbackup.log` in the backups folder, next to the zips. The scheduled task runs with no window, so this is where you find out that last night's backup failed because the profile moved or the disk was full. Only the most recent 200 lines are kept.
 
 ## How Spaces are stored
 
@@ -114,7 +144,8 @@ It cannot:
 ## Notes
 
 - Your profile folder name has a random prefix (for example `xygu6nr4.Default (release)`) that changes every time you reinstall Zen. The tool auto detects the active profile, so this is handled for you.
-- Backups are plain zip files. You can open one and pull out a single file if you ever need to.
+- Backups are plain zip files. You can open one and pull out a single file if you ever need to. Read [Security](#security) for what that implies.
+- Version history is in [CHANGELOG.md](CHANGELOG.md).
 - This project is not affiliated with Zen Browser.
 
 ## Disclaimer

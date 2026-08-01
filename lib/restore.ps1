@@ -33,62 +33,84 @@ if ($Backup) {
 }
 Write-Host "Selected: $($chosen.Name)" -ForegroundColor Green
 
-# 2. extract and read the manifest
+# Everything below runs inside try/finally: the temp folder holds a full copy of
+# the profile, credentials included, and must not survive whatever goes wrong.
 $tmp = Join-Path $env:TEMP ("zenrestore_" + [guid]::NewGuid().ToString('N').Substring(0, 8))
-Expand-Archive -Path $chosen.FullName -DestinationPath $tmp -Force
-$srcProfile = Join-Path $tmp 'profile'
-$manifest   = Get-Content (Join-Path $tmp 'manifest.json') -Raw | ConvertFrom-Json
-$oldPath    = $manifest.sourcePath
-$available  = @($manifest.categories)
-
-# 3. choose the categories
-if (-not $Categories) {
-    Write-Host "`nCategories in this backup:`n" -ForegroundColor Cyan
-    for ($i = 0; $i -lt $available.Count; $i++) {
-        $c = $available[$i]
-        $d = if ($ZenCategories.Contains($c)) { $ZenCategories[$c].desc } else { '' }
-        '{0,2}) {1,-11} {2}' -f ($i + 1), $c, $d | Write-Host
+try {
+    # 2. extract and read the manifest
+    try {
+        Expand-Archive -Path $chosen.FullName -DestinationPath $tmp -Force
+    } catch {
+        Write-Host "Could not open '$($chosen.Name)': $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host 'The file may be corrupted or still being written.' -ForegroundColor Red
+        exit 1
     }
-    Write-Host "`n  Numbers (1,3), ranges (1-4) or names   |   Enter = appearance + shortcuts + spaces + preferences   |   'all' = everything" -ForegroundColor DarkGray
-    $default = @('appearance', 'shortcuts', 'spaces', 'preferences') | Where-Object { $available -contains $_ }
-    $Categories = Read-ZenSelection -Prompt 'Which ones do you want to restore?' -Options $available -Default $default
-}
-if (-not $Categories) { Write-Host 'No categories selected.' -ForegroundColor Red; Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue; exit 1 }
 
-# 4. target profile
-if (-not $ProfilePath) { $ProfilePath = Resolve-ZenProfile $cfg }
-if (-not $ProfilePath) {
-    Write-Host 'No Zen profile found.' -ForegroundColor Red
+    $manifestPath = Join-Path $tmp 'manifest.json'
+    $manifest     = $null
+    if (Test-Path $manifestPath) {
+        try { $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json } catch { }
+    }
+    if (-not $manifest -or -not $manifest.categories) {
+        Write-Host "`n'$($chosen.Name)' has no valid manifest.json." -ForegroundColor Red
+        Write-Host 'This zip was not created by the Zen Backup Tool, so there is nothing safe to restore from it.' -ForegroundColor Red
+        exit 1
+    }
+
+    $srcProfile = Join-Path $tmp 'profile'
+    $oldPath    = $manifest.sourcePath
+    $available  = @($manifest.categories)
+
+    # 3. choose the categories
+    if (-not $Categories) {
+        Write-Host "`nCategories in this backup:`n" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $available.Count; $i++) {
+            $c = $available[$i]
+            $d = if ($ZenCategories.Contains($c)) { $ZenCategories[$c].desc } else { '' }
+            $s = if (Test-ZenSensitive $c) { '(!)' } else { '   ' }
+            '{0,2}) {1} {2,-11} {3}' -f ($i + 1), $s, $c, $d | Write-Host
+        }
+        Write-Host "`n  Numbers (1,3), ranges (1-4) or names   |   Enter = appearance + shortcuts + spaces + preferences   |   'all' = everything" -ForegroundColor DarkGray
+        $default = @('appearance', 'shortcuts', 'spaces', 'preferences') | Where-Object { $available -contains $_ }
+        $Categories = Read-ZenSelection -Prompt 'Which ones do you want to restore?' -Options $available -Default $default
+    }
+    if (-not $Categories) { Write-Host 'No categories selected.' -ForegroundColor Red; exit 1 }
+
+    # 4. target profile
+    if (-not $ProfilePath) { $ProfilePath = Resolve-ZenProfile $cfg }
+    if (-not $ProfilePath) {
+        Write-Host 'No Zen profile found. Open Zen once so it creates one, close it, then try again.' -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "`nTarget profile: $ProfilePath" -ForegroundColor Cyan
+    Write-Host "Restoring: $($Categories -join ', ')" -ForegroundColor Cyan
+
+    # 5. Zen must be closed
+    if (Test-ZenRunning) {
+        Write-Host 'Zen is running. Close it completely and run the restore again.' -ForegroundColor Red
+        exit 1
+    }
+    $ok = Read-Host "`nProceed? The selected files will be overwritten (y/n)"
+    if ($ok.Trim().ToLower() -ne 'y') { Write-Host 'Cancelled.'; exit 0 }
+
+    # 6. copy
+    if (-not (Test-Path $ProfilePath)) { New-Item -ItemType Directory -Path $ProfilePath -Force | Out-Null }
+    foreach ($cat in $Categories) {
+        if (-not $ZenCategories.Contains($cat)) { continue }
+        $r = Copy-ZenItems -Src $srcProfile -Dst $ProfilePath -Items $ZenCategories[$cat].items
+        Write-Host ("  [{0,-11}] {1} restored" -f $cat, $r.Copied) -ForegroundColor Gray
+    }
+
+    # 7. fix prefs/paths/icons and remove user.js
+    if ($Categories -contains 'preferences') {
+        Repair-ZenProfile -TargetProfile $ProfilePath -OldProfilePath $oldPath
+    } else {
+        $uj = Join-Path $ProfilePath 'user.js'
+        if (Test-Path $uj) { Remove-Item $uj -Force }
+    }
+
+    Write-Host "`nDone. You can open Zen now." -ForegroundColor Green
+    Write-ZenLog "Restored $($chosen.Name) [$($Categories -join ',')] into $ProfilePath"
+} finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-    exit 1
 }
-Write-Host "`nTarget profile: $ProfilePath" -ForegroundColor Cyan
-Write-Host "Restoring: $($Categories -join ', ')" -ForegroundColor Cyan
-
-# 5. Zen must be closed
-if (Test-ZenRunning) {
-    Write-Host 'Zen is running. Close it completely and run the restore again.' -ForegroundColor Red
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-    exit 1
-}
-$ok = Read-Host "`nProceed? The selected files will be overwritten (y/n)"
-if ($ok.Trim().ToLower() -ne 'y') { Write-Host 'Cancelled.'; Remove-Item $tmp -Recurse -Force; exit 0 }
-
-# 6. copy
-if (-not (Test-Path $ProfilePath)) { New-Item -ItemType Directory -Path $ProfilePath -Force | Out-Null }
-foreach ($cat in $Categories) {
-    if (-not $ZenCategories.Contains($cat)) { continue }
-    $r = Copy-ZenItems -Src $srcProfile -Dst $ProfilePath -Items $ZenCategories[$cat].items
-    Write-Host ("  [{0,-11}] {1} restored" -f $cat, $r.Copied) -ForegroundColor Gray
-}
-
-# 7. fix prefs/paths/icons and remove user.js
-if ($Categories -contains 'preferences') {
-    Repair-ZenProfile -TargetProfile $ProfilePath -OldProfilePath $oldPath
-} else {
-    $uj = Join-Path $ProfilePath 'user.js'
-    if (Test-Path $uj) { Remove-Item $uj -Force }
-}
-
-Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host "`nDone. You can open Zen now." -ForegroundColor Green
