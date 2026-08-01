@@ -7,7 +7,7 @@
   <circle cx="62" cy="17" r="6" fill="#28c840"/>
   <text xml:space="preserve" x="90" y="22" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#9a9a9a">ZenBackup.bat</text>
 
-  <g font-family="Cascadia Mono, Consolas, Menlo, monospace" font-size="14">    <text xml:space="preserve" x="20" y="62"  fill="#3ae0e0">======= Zen Backup Tool v1.0.0  -  by @Rumi-sketches =======</text>
+  <g font-family="Cascadia Mono, Consolas, Menlo, monospace" font-size="14">    <text xml:space="preserve" x="20" y="62"  fill="#3ae0e0">======= Zen Backup Tool v1.1.0  -  by @Rumi-sketches =======</text>
     <text xml:space="preserve" x="20" y="82"  fill="#cccccc"> Profile : 8ca1ftdb.Default (release)</text>
     <text xml:space="preserve" x="20" y="102" fill="#cccccc"> Backups : C:\Users\You\ZenBackups</text>
     <text xml:space="preserve" x="20" y="122" fill="#cccccc"> Auto    : daily at 13:00   keep 10   [appearance,shortcuts,spaces,preferences]</text>

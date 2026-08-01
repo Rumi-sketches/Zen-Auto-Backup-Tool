@@ -9,7 +9,7 @@ $Global:ZenToolRoot    = Split-Path $PSScriptRoot -Parent
 $Global:ConfigPath     = Join-Path $ZenToolRoot 'config.json'
 $Global:ZenRoot        = Join-Path $env:APPDATA 'zen'
 $Global:TaskName       = 'ZenBackup'
-$Global:ZenToolVersion = '1.0.0'
+$Global:ZenToolVersion = '1.1.0'
 
 # Map of categories to the profile files they cover.
 # Entries ending with '\' are folders (copied recursively).
